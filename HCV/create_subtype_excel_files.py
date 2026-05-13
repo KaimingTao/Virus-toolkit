@@ -172,11 +172,7 @@ def source_qualifier_headers(rows: list[dict[str, str | int]]) -> list[str]:
     return [f"source:{key}" for key in sorted(keys)]
 
 
-def write_workbook(rows: list[dict[str, str | int]], output_path: Path) -> None:
-    workbook = Workbook()
-    worksheet = workbook.active
-    worksheet.title = "Subtype Accessions"
-
+def build_headers(rows: list[dict[str, str | int]]) -> list[str]:
     headers = [
         "Accession",
         "Subtype",
@@ -189,21 +185,45 @@ def write_workbook(rows: list[dict[str, str | int]], output_path: Path) -> None:
         "Sequence Length",
         "GenBank File",
     ]
-    qualifier_headers = source_qualifier_headers(rows)
-    headers.extend(qualifier_headers)
+    headers.extend(source_qualifier_headers(rows))
+    return headers
+
+
+def row_value(row: dict[str, str | int], header: str) -> str | int:
+    if header.startswith("source:"):
+        key = header.split(":", 1)[1]
+        qualifiers = row.get("Source Qualifiers", {})
+        return qualifiers.get(key, "") if isinstance(qualifiers, dict) else ""
+    return row[header]
+
+
+def csv_output_path(excel_output_path: Path) -> Path:
+    return excel_output_path.with_suffix(".csv")
+
+
+def write_csv(rows: list[dict[str, str | int]], output_path: Path) -> None:
+    headers = build_headers(rows)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with output_path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(headers)
+        for row in rows:
+            writer.writerow([row_value(row, header) for header in headers])
+
+
+def write_workbook(rows: list[dict[str, str | int]], output_path: Path) -> None:
+    workbook = Workbook()
+    worksheet = workbook.active
+    worksheet.title = "Subtype Accessions"
+
+    headers = build_headers(rows)
     for idx, header in enumerate(headers, start=1):
         cell = worksheet.cell(row=1, column=idx, value=header)
         cell.font = Font(bold=True)
 
     for row_idx, row in enumerate(rows, start=2):
         for col_idx, header in enumerate(headers, start=1):
-            if header.startswith("source:"):
-                key = header.split(":", 1)[1]
-                qualifiers = row.get("Source Qualifiers", {})
-                value = qualifiers.get(key, "") if isinstance(qualifiers, dict) else ""
-            else:
-                value = row[header]
-            worksheet.cell(row=row_idx, column=col_idx, value=value)
+            worksheet.cell(row=row_idx, column=col_idx, value=row_value(row, header))
 
     worksheet.freeze_panes = "A2"
     worksheet.column_dimensions["A"].width = 18
@@ -229,8 +249,10 @@ def main(argv: list[str]) -> int:
         raise SystemExit(f"GenBank directory not found: {args.genbank_dir}")
 
     rows = load_rows(args.input_csv, args.genbank_dir)
+    csv_path = csv_output_path(args.output)
+    write_csv(rows, csv_path)
     write_workbook(rows, args.output)
-    print(f"Wrote {len(rows)} accession/subtype rows with GenBank metadata to {args.output}")
+    print(f"Wrote {len(rows)} accession/subtype rows to {csv_path} and {args.output}")
     return 0
 
 
