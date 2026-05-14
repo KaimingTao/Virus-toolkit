@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Interactive HIV-1 HXB2 Genome Map</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0;
+      background: #f7f7f7;
+      color: #222;
+    }
+    header {
+      padding: 18px 24px;
+      background: #222;
+      color: white;
+    }
+    main {
+      display: grid;
+      grid-template-columns: minmax(650px, 1fr) 300px;
+      gap: 18px;
+      padding: 18px;
+    }
+    .panel {
+      background: white;
+      border-radius: 12px;
+      box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+      padding: 16px;
+    }
+    .toolbar {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      align-items: center;
+      margin-bottom: 12px;
+    }
+    input, select, button {
+      padding: 8px 10px;
+      border-radius: 8px;
+      border: 1px solid #bbb;
+      font-size: 14px;
+    }
+    button {
+      cursor: pointer;
+      background: #f0f0f0;
+    }
+    svg {
+      width: 100%;
+      height: auto;
+      border: 1px solid #ddd;
+      background: #fff;
+      border-radius: 10px;
+    }
+    .gene rect {
+      fill: #fff;
+      stroke: #222;
+      stroke-width: 1.2;
+      cursor: pointer;
+      transition: fill 0.15s, stroke-width 0.15s;
+    }
+    .gene:hover rect, .gene.selected rect {
+      fill: #dbeafe;
+      stroke-width: 2.5;
+    }
+    .gene text {
+      pointer-events: none;
+      font-size: 13px;
+    }
+    .feature-line {
+      stroke: #444;
+      stroke-width: 1.2;
+    }
+    .axis text {
+      font-size: 12px;
+      fill: #333;
+    }
+    .muted {
+      color: #666;
+      font-size: 13px;
+    }
+    .detail h2 {
+      margin-top: 0;
+    }
+    .detail table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    .detail td {
+      padding: 7px 4px;
+      border-bottom: 1px solid #eee;
+    }
+    @media (max-width: 900px) {
+      main { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Interactive HIV-1 HXB2 Genome Map</h1>
+    <div class="muted">Click or hover over a gene/feature to inspect coordinates.</div>
+  </header>
+
+  <main>
+    <section class="panel">
+      <div class="toolbar">
+        <input id="search" placeholder="Search gene, e.g. env" />
+        <select id="frameFilter">
+          <option value="all">All frames</option>
+          <option value="1">Frame 1</option>
+          <option value="2">Frame 2</option>
+          <option value="3">Frame 3</option>
+        </select>
+        <button id="reset">Reset</button>
+      </div>
+      <svg id="map" viewBox="0 0 1100 420" role="img" aria-label="Interactive HIV-1 HXB2 genome map"></svg>
+    </section>
+
+    <aside class="panel detail" id="details">
+      <h2>No feature selected</h2>
+      <p class="muted">Click a rectangle on the genome map.</p>
+    </aside>
+  </main>
+
+  <script>
+    const genomeLength = 9719;
+    const svg = document.getElementById('map');
+    const details = document.getElementById('details');
+    const searchInput = document.getElementById('search');
+    const frameFilter = document.getElementById('frameFilter');
+    const resetBtn = document.getElementById('reset');
+
+    const genes = [
+      { name: "5' LTR", start: 1, end: 634, frame: 1, type: 'LTR' },
+      { name: 'gag', start: 790, end: 2292, frame: 1, type: 'gene' },
+      { name: 'p17', start: 790, end: 1186, frame: 1, type: 'protein' },
+      { name: 'p24', start: 1186, end: 1879, frame: 1, type: 'protein' },
+      { name: 'p7', start: 1879, end: 2086, frame: 1, type: 'protein' },
+      { name: 'p6', start: 2086, end: 2292, frame: 1, type: 'protein' },
+      { name: 'pol', start: 2085, end: 5096, frame: 3, type: 'gene' },
+      { name: 'prot', start: 2085, end: 2550, frame: 3, type: 'protein' },
+      { name: 'p51 RT', start: 2550, end: 3870, frame: 3, type: 'protein' },
+      { name: 'p15', start: 3870, end: 4230, frame: 3, type: 'protein' },
+      { name: 'p31 int', start: 4230, end: 5096, frame: 3, type: 'protein' },
+      { name: 'vif', start: 5041, end: 5619, frame: 1, type: 'gene' },
+      { name: 'vpr', start: 5559, end: 5850, frame: 3, type: 'gene' },
+      { name: 'tat', start: 5831, end: 8469, frame: 1, type: 'gene' },
+      { name: 'vpu', start: 6062, end: 6310, frame: 2, type: 'gene' },
+      { name: 'env', start: 6225, end: 8795, frame: 3, type: 'gene' },
+      { name: 'gp120', start: 6225, end: 7758, frame: 3, type: 'protein' },
+      { name: 'gp41', start: 7758, end: 8795, frame: 3, type: 'protein' },
+      { name: 'rev', start: 5970, end: 8653, frame: 2, type: 'gene' },
+      { name: 'nef', start: 8797, end: 9417, frame: 1, type: 'gene' },
+      { name: "3' LTR", start: 9086, end: 9719, frame: 2, type: 'LTR' }
+    ];
+
+    let selected = null;
+
+    function x(pos) {
+      const left = 70;
+      const usable = 1000;
+      return left + (pos / genomeLength) * usable;
+    }
+
+    function y(frame, index) {
+      const base = {1: 55, 2: 155, 3: 255}[frame];
+      return base + (index % 2) * 34;
+    }
+
+    function showDetails(g) {
+      details.innerHTML = `
+        <h2>${g.name}</h2>
+        <table>
+          <tr><td>Start</td><td>${g.start}</td></tr>
+          <tr><td>End</td><td>${g.end}</td></tr>
+          <tr><td>Length</td><td>${g.end - g.start + 1} nt</td></tr>
+          <tr><td>Frame</td><td>${g.frame}</td></tr>
+          <tr><td>Type</td><td>${g.type}</td></tr>
+        </table>
+      `;
+    }
+
+    function render() {
+      const query = searchInput.value.trim().toLowerCase();
+      const frame = frameFilter.value;
+      svg.innerHTML = '';
+
+      const ns = 'http://www.w3.org/2000/svg';
+      function el(tag, attrs = {}) {
+        const node = document.createElementNS(ns, tag);
+        for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, v);
+        return node;
+      }
+
+      // Frame labels
+      [1,2,3].forEach(f => {
+        svg.appendChild(el('text', { x: 20, y: {1:82,2:182,3:282}[f], 'font-size': 22, fill: '#999' })).textContent = f;
+        svg.appendChild(el('text', { x: 8, y: 48, 'font-size': 22, fill: '#aaa', transform: 'rotate(90 8,48)' })).textContent = 'FRAME';
+      });
+
+      // title label
+      svg.appendChild(el('text', { x: 20, y: 350, 'font-size': 22, 'font-weight': 'bold' })).textContent = 'HIV-1 HXB2';
+
+      // axis
+      const axisY = 365;
+      svg.appendChild(el('line', { x1: x(0), x2: x(genomeLength), y1: axisY, y2: axisY, stroke: '#222' }));
+      for (let pos = 0; pos <= 9000; pos += 1000) {
+        svg.appendChild(el('line', { x1: x(pos), x2: x(pos), y1: axisY - 6, y2: axisY + 6, stroke: '#222' }));
+        svg.appendChild(el('text', { x: x(pos), y: axisY + 25, 'text-anchor': 'middle', 'font-size': 14 })).textContent = pos;
+      }
+      svg.appendChild(el('line', { x1: x(9719), x2: x(9719), y1: axisY - 6, y2: axisY + 6, stroke: '#222' }));
+      svg.appendChild(el('text', { x: x(9719), y: axisY + 25, 'text-anchor': 'middle', 'font-size': 14 })).textContent = '9719';
+
+      const filtered = genes.filter(g => {
+        const matchQuery = !query || g.name.toLowerCase().includes(query) || g.type.toLowerCase().includes(query);
+        const matchFrame = frame === 'all' || String(g.frame) === frame;
+        return matchQuery && matchFrame;
+      });
+
+      filtered.forEach((g, i) => {
+        const group = el('g', { class: `gene ${selected && selected.name === g.name ? 'selected' : ''}` });
+        const rect = el('rect', {
+          x: x(g.start),
+          y: y(g.frame, i),
+          width: Math.max(5, x(g.end) - x(g.start)),
+          height: 30,
+          rx: 1,
+          'data-name': g.name
+        });
+        const text = el('text', {
+          x: (x(g.start) + x(g.end)) / 2,
+          y: y(g.frame, i) + 20,
+          'text-anchor': 'middle'
+        });
+        text.textContent = g.name;
+
+        group.appendChild(rect);
+        group.appendChild(text);
+        group.addEventListener('mouseenter', () => showDetails(g));
+        group.addEventListener('click', () => {
+          selected = g;
+          showDetails(g);
+          render();
+        });
+        svg.appendChild(group);
+      });
+    }
+
+    searchInput.addEventListener('input', render);
+    frameFilter.addEventListener('change', render);
+    resetBtn.addEventListener('click', () => {
+      searchInput.value = '';
+      frameFilter.value = 'all';
+      selected = null;
+      details.innerHTML = '<h2>No feature selected</h2><p class="muted">Click a rectangle on the genome map.</p>';
+      render();
+    });
+
+    render();
+  </script>
+</body>
+</html>
