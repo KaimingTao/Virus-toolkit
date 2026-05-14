@@ -1,116 +1,333 @@
 #!/usr/bin/env python3
 """
-Search PubMed for a query term and export the results to a CSV file.
+Search PubMed with a query term and export results to a CSV file.
+
+The output columns are aligned to PubMed's CSV export header as closely as the
+E-utilities API allows:
+    PMID,Title,Authors,Citation,First Author,Journal/Book,Publication Year,
+    Create Date,PMCID,NIHMS ID,DOI
 
 Example:
-    python pubmed_search.py --term "machine learning cancer" --out results.csv --email you@example.com
+    uv run pubmed_search.py --term HIV --out hiv_pubmed.csv
 """
+
+from __future__ import annotations
 
 import argparse
 import csv
 import sys
 import time
-from typing import Dict, Iterable, List, Optional
-
-import requests
+from typing import Dict, Iterable, Iterator, List, Optional
+from urllib.error import HTTPError, URLError
+from urllib.parse import urlencode
+from urllib.request import urlopen
+import xml.etree.ElementTree as ET
 
 
 EUTILS_BASE = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
-DEFAULT_BATCH_SIZE = 200  # E-utilities generally allow up to 200 IDs per summary call.
+SEARCH_BATCH_SIZE = 10000
+FETCH_BATCH_SIZE = 200
+REQUEST_DELAY_SECONDS = 0.34
+CSV_COLUMNS = [
+    "PMID",
+    "Title",
+    "Authors",
+    "Citation",
+    "First Author",
+    "Journal/Book",
+    "Publication Year",
+    "Create Date",
+    "PMCID",
+    "NIHMS ID",
+    "DOI",
+]
 
 
-def _request_json(endpoint: str, params: Dict[str, str]) -> Dict:
-    url = f"{EUTILS_BASE}/{endpoint}"
-    response = requests.get(url, params=params, timeout=20)
-    response.raise_for_status()
-    return response.json()
-
-
-def fetch_pmids(term: str, email: Optional[str], api_key: Optional[str], max_results: Optional[int]) -> List[str]:
-    # Initial call to get total count.
-    common_params = {"db": "pubmed", "retmode": "json", "term": term}
+def build_params(email: Optional[str], api_key: Optional[str]) -> Dict[str, str]:
+    params: Dict[str, str] = {}
     if email:
-        common_params["email"] = email
+        params["email"] = email
     if api_key:
-        common_params["api_key"] = api_key
+        params["api_key"] = api_key
+    return params
 
-    initial = _request_json("esearch.fcgi", {**common_params, "retmax": 0})
-    total_count = int(initial["esearchresult"]["count"])
 
+def request_xml(endpoint: str, params: Dict[str, str], retries: int = 3) -> ET.Element:
+    query = urlencode(params)
+    url = f"{EUTILS_BASE}/{endpoint}?{query}"
+
+    last_error: Optional[Exception] = None
+    for attempt in range(1, retries + 1):
+        try:
+            with urlopen(url, timeout=60) as response:
+                return ET.fromstring(response.read())
+        except (HTTPError, URLError, ET.ParseError) as exc:
+            last_error = exc
+            if attempt == retries:
+                break
+            time.sleep(attempt)
+
+    raise RuntimeError(f"Request failed for {endpoint}: {last_error}") from last_error
+
+
+def text_at(node: Optional[ET.Element], path: str, default: str = "") -> str:
+    if node is None:
+        return default
+    found = node.find(path)
+    if found is None or found.text is None:
+        return default
+    return found.text.strip()
+
+
+def iter_texts(node: Optional[ET.Element], path: str) -> Iterator[str]:
+    if node is None:
+        return
+    for found in node.findall(path):
+        if found.text:
+            value = found.text.strip()
+            if value:
+                yield value
+
+
+def join_nonempty(parts: Iterable[str], sep: str = " ") -> str:
+    return sep.join(part for part in parts if part)
+
+
+def collect_pubmed_history(
+    term: str,
+    email: Optional[str],
+    api_key: Optional[str],
+    max_results: Optional[int],
+) -> tuple[int, str, str]:
+    params = {
+        "db": "pubmed",
+        "term": term,
+        "retmode": "xml",
+        "usehistory": "y",
+        "retmax": "0",
+        **build_params(email, api_key),
+    }
+    root = request_xml("esearch.fcgi", params)
+    count = int(text_at(root, "./Count", "0"))
+    webenv = text_at(root, "./WebEnv")
+    query_key = text_at(root, "./QueryKey")
+    if not webenv or not query_key:
+        raise RuntimeError("PubMed search did not return WebEnv/QueryKey.")
     if max_results is not None:
-        total_count = min(total_count, max_results)
-
-    pmids: List[str] = []
-    for start in range(0, total_count, DEFAULT_BATCH_SIZE):
-        remaining = total_count - start
-        batch_size = min(DEFAULT_BATCH_SIZE, remaining)
-        payload = {
-            **common_params,
-            "retstart": start,
-            "retmax": batch_size,
-        }
-        search = _request_json("esearch.fcgi", payload)
-        pmids.extend(search["esearchresult"].get("idlist", []))
-        time.sleep(0.34)  # Be gentle with NCBI rate limits (~3 requests/second without key).
-
-    return pmids
+        count = min(count, max_results)
+    return count, webenv, query_key
 
 
-def fetch_summaries(pmids: Iterable[str], email: Optional[str], api_key: Optional[str]) -> List[Dict[str, str]]:
-    pmid_list = list(pmids)
-    summaries: List[Dict[str, str]] = []
-    common_params = {"db": "pubmed", "retmode": "json"}
-    if email:
-        common_params["email"] = email
-    if api_key:
-        common_params["api_key"] = api_key
-
-    for start in range(0, len(pmid_list), DEFAULT_BATCH_SIZE):
-        batch = pmid_list[start : start + DEFAULT_BATCH_SIZE]
-        payload = {**common_params, "id": ",".join(batch), "version": "2.0"}
-        data = _request_json("esummary.fcgi", payload)
-        result = data.get("result", {})
-        for uid in result.get("uids", []):
-            item = result.get(uid, {})
-            authors = item.get("authors") or []
-            author_names = "; ".join(a.get("name", "") for a in authors if a.get("name"))
-            journal = item.get("fulljournalname") or item.get("source") or ""
-            pubdate = item.get("pubdate") or ""
-            article_ids = item.get("articleids") or []
-            doi = ""
-            for aid in article_ids:
-                if aid.get("idtype") == "doi":
-                    doi = aid.get("value", "")
-                    break
-            summaries.append(
-                {
-                    "pmid": uid,
-                    "title": item.get("title") or "",
-                    "journal": journal,
-                    "pubdate": pubdate,
-                    "authors": author_names,
-                    "doi": doi,
-                }
-            )
-        time.sleep(0.34)
-
-    return summaries
+def fetch_batch(
+    webenv: str,
+    query_key: str,
+    start: int,
+    batch_size: int,
+    email: Optional[str],
+    api_key: Optional[str],
+) -> ET.Element:
+    params = {
+        "db": "pubmed",
+        "query_key": query_key,
+        "WebEnv": webenv,
+        "retstart": str(start),
+        "retmax": str(batch_size),
+        "retmode": "xml",
+        **build_params(email, api_key),
+    }
+    return request_xml("efetch.fcgi", params)
 
 
-def write_csv(rows: List[Dict[str, str]], path: str) -> None:
-    fieldnames = ["pmid", "title", "journal", "pubdate", "authors", "doi"]
-    with open(path, "w", newline="", encoding="utf-8") as csvfile:
-        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+def extract_author(author: ET.Element) -> str:
+    collective = text_at(author, "./CollectiveName")
+    if collective:
+        return collective
+
+    last_name = text_at(author, "./LastName")
+    fore_name = text_at(author, "./ForeName")
+    initials = text_at(author, "./Initials")
+
+    if last_name and fore_name:
+        return f"{last_name} {fore_name}"
+    if last_name and initials:
+        return f"{last_name} {initials}"
+    return last_name or fore_name or initials
+
+
+def extract_authors(article: ET.Element) -> List[str]:
+    authors: List[str] = []
+    for author in article.findall(".//AuthorList/Author"):
+        value = extract_author(author)
+        if value:
+            authors.append(value)
+    return authors
+
+
+def extract_title(article: ET.Element) -> str:
+    title_node = article.find("./ArticleTitle")
+    if title_node is None:
+        return ""
+    return "".join(title_node.itertext()).strip()
+
+
+def extract_journal(article: ET.Element) -> str:
+    return (
+        text_at(article, "./Journal/Title")
+        or text_at(article, "./Book/BookTitle")
+        or text_at(article, "./Journal/ISOAbbreviation")
+    )
+
+
+def extract_publication_year(article: ET.Element, pubmed_data: ET.Element) -> str:
+    for path in (
+        "./Journal/JournalIssue/PubDate/Year",
+        "./ArticleDate/Year",
+        "./Book/PubDate/Year",
+    ):
+        value = text_at(article, path)
+        if value:
+            return value
+
+    medline_date = text_at(article, "./Journal/JournalIssue/PubDate/MedlineDate")
+    if medline_date:
+        digits = "".join(ch for ch in medline_date if ch.isdigit())
+        if len(digits) >= 4:
+            return digits[:4]
+
+    for pub_status in pubmed_data.findall("./History/PubMedPubDate"):
+        if pub_status.attrib.get("PubStatus") == "pubmed":
+            value = text_at(pub_status, "./Year")
+            if value:
+                return value
+
+    return ""
+
+
+def extract_create_date(pubmed_data: ET.Element) -> str:
+    for pub_status in pubmed_data.findall("./History/PubMedPubDate"):
+        if pub_status.attrib.get("PubStatus") == "pubmed":
+            year = text_at(pub_status, "./Year")
+            month = text_at(pub_status, "./Month").zfill(2)
+            day = text_at(pub_status, "./Day").zfill(2)
+            if year and month and day:
+                return f"{year}/{month}/{day}"
+    return ""
+
+
+def extract_article_ids(pubmed_data: ET.Element) -> Dict[str, str]:
+    ids: Dict[str, str] = {}
+    for article_id in pubmed_data.findall("./ArticleIdList/ArticleId"):
+        id_type = article_id.attrib.get("IdType", "").lower()
+        value = (article_id.text or "").strip()
+        if id_type and value and id_type not in ids:
+            ids[id_type] = value
+    return ids
+
+
+def build_citation(article: ET.Element, pubmed_data: ET.Element, doi: str) -> str:
+    journal = extract_journal(article)
+    year = extract_publication_year(article, pubmed_data)
+    volume = text_at(article, "./Journal/JournalIssue/Volume")
+    issue = text_at(article, "./Journal/JournalIssue/Issue")
+    pages = text_at(article, "./Pagination/MedlinePgn")
+
+    pieces: List[str] = []
+    if journal:
+        pieces.append(f"{journal}.")
+
+    date_bits = [year]
+    month = text_at(article, "./Journal/JournalIssue/PubDate/Month")
+    day = text_at(article, "./Journal/JournalIssue/PubDate/Day")
+    if month:
+        date_bits.append(month)
+    if day:
+        date_bits.append(day)
+    date_text = " ".join(bit for bit in date_bits if bit)
+    if date_text:
+        pieces.append(date_text + ";")
+
+    volume_issue = volume
+    if issue:
+        volume_issue = f"{volume}({issue})" if volume else f"({issue})"
+    if volume_issue:
+        pieces.append(volume_issue)
+
+    if pages:
+        if volume_issue:
+            pieces[-1] = pieces[-1] + f":{pages}."
+        else:
+            pieces.append(f"{pages}.")
+
+    citation = " ".join(pieces).strip()
+    if doi:
+        citation = f"{citation} doi: {doi}.".strip()
+    return citation
+
+
+def article_to_row(article_node: ET.Element) -> Dict[str, str]:
+    medline = article_node.find("./MedlineCitation")
+    article = medline.find("./Article") if medline is not None else None
+    pubmed_data = article_node.find("./PubmedData")
+
+    if medline is None or article is None or pubmed_data is None:
+        raise RuntimeError("Unexpected PubMed article structure in efetch response.")
+
+    authors = extract_authors(article)
+    author_text = ", ".join(authors)
+    first_author = authors[0] if authors else ""
+    ids = extract_article_ids(pubmed_data)
+    doi = ids.get("doi", "")
+
+    return {
+        "PMID": text_at(medline, "./PMID"),
+        "Title": extract_title(article),
+        "Authors": author_text,
+        "Citation": build_citation(article, pubmed_data, doi),
+        "First Author": first_author,
+        "Journal/Book": extract_journal(article),
+        "Publication Year": extract_publication_year(article, pubmed_data),
+        "Create Date": extract_create_date(pubmed_data),
+        "PMCID": ids.get("pmc", ""),
+        "NIHMS ID": ids.get("mid", ""),
+        "DOI": doi,
+    }
+
+
+def write_csv(
+    term: str,
+    out_path: str,
+    email: Optional[str],
+    api_key: Optional[str],
+    max_results: Optional[int],
+) -> int:
+    total_count, webenv, query_key = collect_pubmed_history(term, email, api_key, max_results)
+    if total_count == 0:
+        with open(out_path, "w", newline="", encoding="utf-8-sig") as csvfile:
+            writer = csv.DictWriter(csvfile, fieldnames=CSV_COLUMNS)
+            writer.writeheader()
+        return 0
+
+    written = 0
+    with open(out_path, "w", newline="", encoding="utf-8-sig") as csvfile:
+        writer = csv.DictWriter(csvfile, fieldnames=CSV_COLUMNS)
         writer.writeheader()
-        for row in rows:
-            writer.writerow(row)
+
+        for start in range(0, total_count, FETCH_BATCH_SIZE):
+            batch_size = min(FETCH_BATCH_SIZE, total_count - start)
+            root = fetch_batch(webenv, query_key, start, batch_size, email, api_key)
+            for article_node in root.findall("./PubmedArticle"):
+                writer.writerow(article_to_row(article_node))
+                written += 1
+            time.sleep(REQUEST_DELAY_SECONDS)
+
+    return written
 
 
 def parse_args(argv: List[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Search PubMed and save results to CSV.")
-    parser.add_argument("--term", required=True, help="Search query for PubMed.")
-    parser.add_argument("--out", required=True, help="Output CSV file path.")
-    parser.add_argument("--email", help="Your email (recommended for NCBI E-utilities).")
+    parser.add_argument("--term", default="HIV", help="Search query for PubMed.")
+    parser.add_argument("--out", default="hiv_pubmed.csv", help="Output CSV file path.")
+    parser.add_argument("--email", help="Your email address for NCBI E-utilities.")
     parser.add_argument("--api-key", help="NCBI API key to increase rate limits.")
     parser.add_argument("--max-results", type=int, help="Optional cap on number of articles to fetch.")
     return parser.parse_args(argv)
@@ -118,16 +335,20 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
 
 def main(argv: List[str]) -> int:
     args = parse_args(argv)
-    pmids = fetch_pmids(args.term, args.email, args.api_key, args.max_results)
-    if not pmids:
-        print("No results found.", file=sys.stderr)
+    try:
+        written = write_csv(args.term, args.out, args.email, args.api_key, args.max_results)
+    except Exception as exc:
+        print(f"Failed: {exc}", file=sys.stderr)
         return 1
 
-    summaries = fetch_summaries(pmids, args.email, args.api_key)
-    write_csv(summaries, args.out)
-    print(f"Wrote {len(summaries)} records to {args.out}")
+    if written == 0:
+        print(f"No results found for term {args.term!r}. Wrote header only to {args.out}")
+        return 0
+
+    print(f"Wrote {written} PubMed records to {args.out}")
+    print("Note: the CSV columns match PubMed's export header, but citation formatting may not be byte-for-byte identical to the website export.")
     return 0
 
 
 if __name__ == "__main__":
-    main(sys.argv[1:])
+    raise SystemExit(main(sys.argv[1:]))
