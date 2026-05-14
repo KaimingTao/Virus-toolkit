@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+from http.client import IncompleteRead
 import sys
 import time
 from typing import Dict, Iterable, Iterator, List, Optional
@@ -25,8 +26,7 @@ import xml.etree.ElementTree as ET
 
 
 EUTILS_BASE = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
-SEARCH_BATCH_SIZE = 10000
-FETCH_BATCH_SIZE = 200
+FETCH_BATCH_SIZE = 100
 REQUEST_DELAY_SECONDS = 0.34
 CSV_COLUMNS = [
     "PMID",
@@ -61,6 +61,17 @@ def request_xml(endpoint: str, params: Dict[str, str], retries: int = 3) -> ET.E
         try:
             with urlopen(url, timeout=60) as response:
                 return ET.fromstring(response.read())
+        except IncompleteRead as exc:
+            last_error = exc
+            partial = exc.partial
+            if partial:
+                try:
+                    return ET.fromstring(partial)
+                except ET.ParseError:
+                    pass
+            if attempt == retries:
+                break
+            time.sleep(attempt)
         except (HTTPError, URLError, ET.ParseError) as exc:
             last_error = exc
             if attempt == retries:
