@@ -43,6 +43,41 @@ The script then fetches records in batches using:
 
 This is the standard approach for large PubMed result sets because it avoids sending every PMID in the URL.
 
+## PubMed ESearch limit
+
+The current script uses `esearch.fcgi` on `db=pubmed` and then pages through the saved result set with `WebEnv` and `QueryKey`.
+
+This has an important PubMed limitation:
+
+- for PubMed, `ESearch` can only retrieve the first `10,000` records matching a query
+
+This is documented by NCBI in the E-utilities guide:
+
+- https://www.ncbi.nlm.nih.gov/books/NBK25499/
+
+Practical consequence:
+
+- a very broad query like `HIV` may show hundreds of thousands of results on the PubMed website
+- the current script can only access roughly the first `10,000` of those results from one `ESearch` history session
+
+That is why a website search such as:
+
+```text
+https://pubmed.ncbi.nlm.nih.gov/?term=hiv&filter=years.1984-2026
+```
+
+can show about `456703` results, while the current CSV export run produced only about `9968` records plus the header row.
+
+## Workaround for full exports
+
+To retrieve all PubMed results for a broad term, the query must be split into smaller subqueries so that each subquery returns fewer than `10,000` records.
+
+Typical approaches:
+
+- split by publication year
+- split by publication month for years that still exceed `10,000`
+- merge all subquery outputs into one CSV
+
 ## Why `IncompleteRead(...)` happened
 
 The error:
