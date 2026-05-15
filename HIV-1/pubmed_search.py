@@ -15,10 +15,11 @@ from __future__ import annotations
 
 import argparse
 import csv
+from datetime import date, timedelta
 from http.client import IncompleteRead
 import sys
 import time
-from typing import Dict, Iterable, Iterator, List, Optional
+from typing import Dict, Iterable, Iterator, List, Optional, Set, Tuple
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import urlopen
@@ -28,6 +29,9 @@ import xml.etree.ElementTree as ET
 EUTILS_BASE = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
 FETCH_BATCH_SIZE = 100
 REQUEST_DELAY_SECONDS = 0.34
+PUBMED_QUERY_LIMIT = 9999
+DATE_FIELD = "PDAT"
+EARLIEST_PUBMED_DATE = date(1800, 1, 1)
 CSV_COLUMNS = [
     "PMID",
     "Title",
@@ -126,7 +130,64 @@ def collect_pubmed_history(
         raise RuntimeError("PubMed search did not return WebEnv/QueryKey.")
     if max_results is not None:
         count = min(count, max_results)
+    time.sleep(REQUEST_DELAY_SECONDS)
     return count, webenv, query_key
+
+
+def count_pubmed_hits(term: str, email: Optional[str], api_key: Optional[str]) -> int:
+    params = {
+        "db": "pubmed",
+        "term": term,
+        "rettype": "count",
+        "retmode": "xml",
+        "retmax": "0",
+        **build_params(email, api_key),
+    }
+    root = request_xml("esearch.fcgi", params)
+    count = int(text_at(root, "./Count", "0"))
+    time.sleep(REQUEST_DELAY_SECONDS)
+    return count
+
+
+def build_dated_term(term: str, start_date: date, end_date: date) -> str:
+    date_clause = (
+        f'"{start_date:%Y/%m/%d}"[{DATE_FIELD}] : "{end_date:%Y/%m/%d}"[{DATE_FIELD}]'
+    )
+    return f"({term}) AND ({date_clause})"
+
+
+def split_date_range(start_date: date, end_date: date) -> Tuple[Tuple[date, date], Tuple[date, date]]:
+    total_days = (end_date - start_date).days
+    midpoint = start_date + timedelta(days=total_days // 2)
+    left = (start_date, midpoint)
+    right = (midpoint + timedelta(days=1), end_date)
+    return left, right
+
+
+def build_query_segments(
+    term: str,
+    email: Optional[str],
+    api_key: Optional[str],
+    start_date: date,
+    end_date: date,
+    limit: int = PUBMED_QUERY_LIMIT,
+) -> List[Tuple[str, int]]:
+    dated_term = build_dated_term(term, start_date, end_date)
+    count = count_pubmed_hits(dated_term, email, api_key)
+    if count == 0:
+        return []
+    if count <= limit:
+        return [(dated_term, count)]
+    if start_date >= end_date:
+        raise RuntimeError(
+            f"PubMed returned {count} results for single day {start_date:%Y-%m-%d}, "
+            "which still exceeds the supported query limit."
+        )
+
+    left_range, right_range = split_date_range(start_date, end_date)
+    segments = build_query_segments(term, email, api_key, *left_range, limit=limit)
+    segments.extend(build_query_segments(term, email, api_key, *right_range, limit=limit))
+    return segments
 
 
 def fetch_batch(
@@ -311,25 +372,51 @@ def write_csv(
     api_key: Optional[str],
     max_results: Optional[int],
 ) -> int:
-    total_count, webenv, query_key = collect_pubmed_history(term, email, api_key, max_results)
+    total_count = count_pubmed_hits(term, email, api_key)
+    print(f"Total PubMed hits for {term!r}: {total_count}")
     if total_count == 0:
         with open(out_path, "w", newline="", encoding="utf-8-sig") as csvfile:
             writer = csv.DictWriter(csvfile, fieldnames=CSV_COLUMNS)
             writer.writeheader()
         return 0
 
+    today = date.today()
+    segments = build_query_segments(term, email, api_key, EARLIEST_PUBMED_DATE, today)
+    print(f"Split into {len(segments)} PubMed date segment(s) to stay under the API limit.")
+
     written = 0
+    seen_pmids: Set[str] = set()
     with open(out_path, "w", newline="", encoding="utf-8-sig") as csvfile:
         writer = csv.DictWriter(csvfile, fieldnames=CSV_COLUMNS)
         writer.writeheader()
 
-        for start in range(0, total_count, FETCH_BATCH_SIZE):
-            batch_size = min(FETCH_BATCH_SIZE, total_count - start)
-            root = fetch_batch(webenv, query_key, start, batch_size, email, api_key)
-            for article_node in root.findall("./PubmedArticle"):
-                writer.writerow(article_to_row(article_node))
-                written += 1
-            time.sleep(REQUEST_DELAY_SECONDS)
+        for segment_term, segment_count in segments:
+            remaining = None if max_results is None else max_results - written
+            if remaining is not None and remaining <= 0:
+                break
+
+            fetch_count, webenv, query_key = collect_pubmed_history(
+                segment_term,
+                email,
+                api_key,
+                remaining if remaining is not None else None,
+            )
+            fetch_total = min(segment_count, fetch_count)
+
+            for start in range(0, fetch_total, FETCH_BATCH_SIZE):
+                batch_size = min(FETCH_BATCH_SIZE, fetch_total - start)
+                root = fetch_batch(webenv, query_key, start, batch_size, email, api_key)
+                for article_node in root.findall("./PubmedArticle"):
+                    row = article_to_row(article_node)
+                    pmid = row["PMID"]
+                    if pmid in seen_pmids:
+                        continue
+                    writer.writerow(row)
+                    seen_pmids.add(pmid)
+                    written += 1
+                    if max_results is not None and written >= max_results:
+                        return written
+                time.sleep(REQUEST_DELAY_SECONDS)
 
     return written
 
