@@ -16,7 +16,10 @@ from __future__ import annotations
 import argparse
 import csv
 from datetime import date, timedelta
+import hashlib
 from http.client import IncompleteRead
+import json
+from pathlib import Path
 import sys
 import time
 from typing import Dict, Iterable, Iterator, List, Optional, Set, Tuple
@@ -32,6 +35,7 @@ REQUEST_DELAY_SECONDS = 0.34
 PUBMED_QUERY_LIMIT = 9999
 DATE_FIELD = "PDAT"
 EARLIEST_PUBMED_DATE = date(1800, 1, 1)
+CACHE_PATH = Path(__file__).with_name(".pubmed_search_cache.json")
 CSV_COLUMNS = [
     "PMID",
     "Title",
@@ -45,6 +49,94 @@ CSV_COLUMNS = [
     "NIHMS ID",
     "DOI",
 ]
+_CACHE: Optional[Dict[str, Dict[str, object]]] = None
+
+
+class ChunkedCsvWriter:
+    def __init__(self, base_path: Path, rows_per_file: int, fieldnames: List[str]) -> None:
+        if rows_per_file < 1:
+            raise ValueError("rows_per_file must be at least 1.")
+
+        self.base_path = base_path
+        self.rows_per_file = rows_per_file
+        self.fieldnames = fieldnames
+        self.output_dir = base_path.with_name(f"{base_path.stem}_split")
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+
+        self._file_handle = None
+        self._writer: Optional[csv.DictWriter] = None
+        self._chunk_start_row = 1
+        self._rows_in_chunk = 0
+        self._temp_chunk_path: Optional[Path] = None
+        self.files_written = 0
+
+    def _build_chunk_path(self, start_row: int, end_row: int) -> Path:
+        return self.output_dir / f"{self.base_path.stem}_{start_row:06d}_{end_row:06d}.csv"
+
+    def _open_next_chunk(self) -> None:
+        self._temp_chunk_path = self.output_dir / f"{self.base_path.stem}_{self._chunk_start_row:06d}.part"
+        self._file_handle = self._temp_chunk_path.open("w", newline="", encoding="utf-8-sig")
+        self._writer = csv.DictWriter(self._file_handle, fieldnames=self.fieldnames)
+        self._writer.writeheader()
+        self.files_written += 1
+
+    def write_row(self, row: Dict[str, str], row_number: int) -> None:
+        if self._writer is None or self._rows_in_chunk >= self.rows_per_file:
+            self.close()
+            self._chunk_start_row = row_number
+            self._rows_in_chunk = 0
+            self._open_next_chunk()
+
+        assert self._writer is not None
+        self._writer.writerow(row)
+        self._rows_in_chunk += 1
+
+    def close(self) -> None:
+        if self._file_handle is not None:
+            self._file_handle.close()
+            if self._temp_chunk_path is not None and self._rows_in_chunk > 0:
+                end_row = self._chunk_start_row + self._rows_in_chunk - 1
+                self._temp_chunk_path.replace(self._build_chunk_path(self._chunk_start_row, end_row))
+            self._file_handle = None
+            self._writer = None
+            self._temp_chunk_path = None
+
+
+def load_cache() -> Dict[str, Dict[str, object]]:
+    global _CACHE
+    if _CACHE is not None:
+        return _CACHE
+
+    if not CACHE_PATH.exists():
+        _CACHE = {}
+        return _CACHE
+
+    try:
+        payload = json.loads(CACHE_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        _CACHE = {}
+        return _CACHE
+
+    entries = payload.get("entries", {}) if isinstance(payload, dict) else {}
+    _CACHE = entries if isinstance(entries, dict) else {}
+    return _CACHE
+
+
+def save_cache(cache: Dict[str, Dict[str, object]]) -> None:
+    payload = {"version": 1, "entries": cache}
+    temp_path = CACHE_PATH.with_suffix(".tmp")
+    temp_path.write_text(json.dumps(payload, ensure_ascii=True, sort_keys=True), encoding="utf-8")
+    temp_path.replace(CACHE_PATH)
+
+
+def normalize_cache_params(params: Dict[str, str]) -> Dict[str, str]:
+    return {key: params[key] for key in sorted(params) if key not in {"email", "api_key"}}
+
+
+def build_cache_key(endpoint: str, params: Dict[str, str]) -> str:
+    normalized = {"endpoint": endpoint, "params": normalize_cache_params(params)}
+    serialized = json.dumps(normalized, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
 
 
 def build_params(email: Optional[str], api_key: Optional[str]) -> Dict[str, str]:
@@ -57,20 +149,64 @@ def build_params(email: Optional[str], api_key: Optional[str]) -> Dict[str, str]
 
 
 def request_xml(endpoint: str, params: Dict[str, str], retries: int = 3) -> ET.Element:
+    cache = load_cache()
+    cache_key = build_cache_key(endpoint, params)
+    query_summary = summarize_query(params.get("term", ""), limit=80)
+    cached_entry = cache.get(cache_key)
+    if isinstance(cached_entry, dict):
+        cached_xml = cached_entry.get("xml")
+        if isinstance(cached_xml, str):
+            if endpoint == "efetch.fcgi":
+                batch_start = int(params.get("retstart", "0")) + 1
+                batch_size = int(params.get("retmax", "0"))
+                batch_end = batch_start + batch_size - 1 if batch_size > 0 else batch_start
+                print(
+                    f"[cache] {endpoint} rows {batch_start}-{batch_end}"
+                )
+            elif query_summary:
+                print(f"[cache] {endpoint} query: {query_summary}")
+            else:
+                print(f"[cache] {endpoint}")
+            return ET.fromstring(cached_xml)
+
     query = urlencode(params)
     url = f"{EUTILS_BASE}/{endpoint}?{query}"
+    if endpoint == "efetch.fcgi":
+        batch_start = int(params.get("retstart", "0")) + 1
+        batch_size = int(params.get("retmax", "0"))
+        batch_end = batch_start + batch_size - 1 if batch_size > 0 else batch_start
+        print(f"[api] {endpoint} rows {batch_start}-{batch_end}")
+    elif query_summary:
+        print(f"[api] {endpoint} query: {query_summary}")
+    else:
+        print(f"[api] {endpoint}")
 
     last_error: Optional[Exception] = None
     for attempt in range(1, retries + 1):
         try:
             with urlopen(url, timeout=60) as response:
-                return ET.fromstring(response.read())
+                xml_bytes = response.read()
+                root = ET.fromstring(xml_bytes)
+                cache[cache_key] = {
+                    "endpoint": endpoint,
+                    "params": normalize_cache_params(params),
+                    "xml": xml_bytes.decode("utf-8"),
+                }
+                save_cache(cache)
+                return root
         except IncompleteRead as exc:
             last_error = exc
             partial = exc.partial
             if partial:
                 try:
-                    return ET.fromstring(partial)
+                    root = ET.fromstring(partial)
+                    cache[cache_key] = {
+                        "endpoint": endpoint,
+                        "params": normalize_cache_params(params),
+                        "xml": partial.decode("utf-8"),
+                    }
+                    save_cache(cache)
+                    return root
                 except ET.ParseError:
                     pass
             if attempt == retries:
@@ -108,12 +244,20 @@ def join_nonempty(parts: Iterable[str], sep: str = " ") -> str:
     return sep.join(part for part in parts if part)
 
 
+def summarize_query(term: str, limit: int = 120) -> str:
+    normalized = " ".join(term.split())
+    if len(normalized) <= limit:
+        return normalized
+    return normalized[: limit - 3] + "..."
+
+
 def collect_pubmed_history(
     term: str,
     email: Optional[str],
     api_key: Optional[str],
     max_results: Optional[int],
 ) -> tuple[int, str, str]:
+    print(f"Preparing PubMed history for query: {summarize_query(term)}")
     params = {
         "db": "pubmed",
         "term": term,
@@ -135,6 +279,7 @@ def collect_pubmed_history(
 
 
 def count_pubmed_hits(term: str, email: Optional[str], api_key: Optional[str]) -> int:
+    print(f"Counting PubMed hits for query: {summarize_query(term)}")
     params = {
         "db": "pubmed",
         "term": term,
@@ -173,10 +318,16 @@ def build_query_segments(
     limit: int = PUBMED_QUERY_LIMIT,
 ) -> List[Tuple[str, int]]:
     dated_term = build_dated_term(term, start_date, end_date)
+    print(f"Checking date range {start_date:%Y-%m-%d} to {end_date:%Y-%m-%d}")
     count = count_pubmed_hits(dated_term, email, api_key)
     if count == 0:
+        print(f"  Range {start_date:%Y-%m-%d} to {end_date:%Y-%m-%d}: 0 hits")
         return []
     if count <= limit:
+        print(
+            f"  Range {start_date:%Y-%m-%d} to {end_date:%Y-%m-%d}: "
+            f"{count} hits, keeping as one segment"
+        )
         return [(dated_term, count)]
     if start_date >= end_date:
         raise RuntimeError(
@@ -184,6 +335,10 @@ def build_query_segments(
             "which still exceeds the supported query limit."
         )
 
+    print(
+        f"  Range {start_date:%Y-%m-%d} to {end_date:%Y-%m-%d}: "
+        f"{count} hits, splitting further"
+    )
     left_range, right_range = split_date_range(start_date, end_date)
     segments = build_query_segments(term, email, api_key, *left_range, limit=limit)
     segments.extend(build_query_segments(term, email, api_key, *right_range, limit=limit))
@@ -371,14 +526,16 @@ def write_csv(
     email: Optional[str],
     api_key: Optional[str],
     max_results: Optional[int],
-) -> int:
+    rows_per_file: int,
+) -> tuple[int, int, Path]:
+    base_path = Path(out_path)
     total_count = count_pubmed_hits(term, email, api_key)
     print(f"Total PubMed hits for {term!r}: {total_count}")
     if total_count == 0:
         with open(out_path, "w", newline="", encoding="utf-8-sig") as csvfile:
             writer = csv.DictWriter(csvfile, fieldnames=CSV_COLUMNS)
             writer.writeheader()
-        return 0
+        return 0, 0, base_path
 
     today = date.today()
     segments = build_query_segments(term, email, api_key, EARLIEST_PUBMED_DATE, today)
@@ -386,11 +543,9 @@ def write_csv(
 
     written = 0
     seen_pmids: Set[str] = set()
-    with open(out_path, "w", newline="", encoding="utf-8-sig") as csvfile:
-        writer = csv.DictWriter(csvfile, fieldnames=CSV_COLUMNS)
-        writer.writeheader()
-
-        for segment_term, segment_count in segments:
+    writer = ChunkedCsvWriter(base_path, rows_per_file, CSV_COLUMNS)
+    try:
+        for segment_index, (segment_term, segment_count) in enumerate(segments, start=1):
             remaining = None if max_results is None else max_results - written
             if remaining is not None and remaining <= 0:
                 break
@@ -402,39 +557,78 @@ def write_csv(
                 remaining if remaining is not None else None,
             )
             fetch_total = min(segment_count, fetch_count)
+            print(
+                f"Segment {segment_index}/{len(segments)}: fetching {fetch_total} record(s) "
+                f"for query {segment_term!r}"
+            )
 
             for start in range(0, fetch_total, FETCH_BATCH_SIZE):
                 batch_size = min(FETCH_BATCH_SIZE, fetch_total - start)
+                batch_number = start // FETCH_BATCH_SIZE + 1
+                batch_end = min(start + batch_size, fetch_total)
+                print(
+                    f"  Batch {batch_number}: loading segment records "
+                    f"{start + 1}-{batch_end} of {fetch_total}"
+                )
                 root = fetch_batch(webenv, query_key, start, batch_size, email, api_key)
+                batch_written = 0
                 for article_node in root.findall("./PubmedArticle"):
                     row = article_to_row(article_node)
                     pmid = row["PMID"]
                     if pmid in seen_pmids:
                         continue
-                    writer.writerow(row)
                     seen_pmids.add(pmid)
                     written += 1
+                    writer.write_row(row, written)
+                    batch_written += 1
                     if max_results is not None and written >= max_results:
-                        return written
+                        return written, writer.files_written, writer.output_dir
+                segment_progress = min(start + batch_size, fetch_total)
+                print(
+                    f"  Batch {batch_number}: "
+                    f"{segment_progress}/{fetch_total} segment records processed, "
+                    f"{written}/{total_count if max_results is None else min(total_count, max_results)} "
+                    f"overall rows written "
+                    f"(batch wrote {batch_written})"
+                )
                 time.sleep(REQUEST_DELAY_SECONDS)
+    finally:
+        writer.close()
 
-    return written
+    return written, writer.files_written, writer.output_dir
 
 
 def parse_args(argv: List[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Search PubMed and save results to CSV.")
     parser.add_argument("--term", default="HIV", help="Search query for PubMed.")
-    parser.add_argument("--out", default="hiv_pubmed.csv", help="Output CSV file path.")
+    parser.add_argument(
+        "--out",
+        default="hiv_pubmed.csv",
+        help="Base CSV file path. Results are written to <stem>_split/*.csv.",
+    )
     parser.add_argument("--email", help="Your email address for NCBI E-utilities.")
     parser.add_argument("--api-key", help="NCBI API key to increase rate limits.")
     parser.add_argument("--max-results", type=int, help="Optional cap on number of articles to fetch.")
+    parser.add_argument(
+        "--rows-per-file",
+        type=int,
+        default=10000,
+        help="Number of data rows per output CSV file (default: 10000).",
+    )
     return parser.parse_args(argv)
 
 
 def main(argv: List[str]) -> int:
     args = parse_args(argv)
     try:
-        written = write_csv(args.term, args.out, args.email, args.api_key, args.max_results)
+        written, files_written, output_dir = write_csv(
+            args.term,
+            args.out,
+            args.email,
+            args.api_key,
+            args.max_results,
+            args.rows_per_file,
+        )
     except Exception as exc:
         print(f"Failed: {exc}", file=sys.stderr)
         return 1
@@ -443,7 +637,7 @@ def main(argv: List[str]) -> int:
         print(f"No results found for term {args.term!r}. Wrote header only to {args.out}")
         return 0
 
-    print(f"Wrote {written} PubMed records to {args.out}")
+    print(f"Wrote {written} PubMed records across {files_written} file(s) in {output_dir}")
     print("Note: the CSV columns match PubMed's export header, but citation formatting may not be byte-for-byte identical to the website export.")
     return 0
 
