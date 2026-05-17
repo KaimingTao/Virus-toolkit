@@ -1,0 +1,17 @@
+pubmed_search.py workflow logic review
+
+- The script builds an index of existing split CSV files, tracking PMIDs already written so reruns can skip duplicates.
+- It counts total PubMed hits for the raw term with `esearch.fcgi`.
+- It recursively splits the query by `PDAT` date ranges until each segment is under the PubMed history/query limit.
+- For each segment, it creates a PubMed history session with `usehistory=y` and fetches records in `efetch` batches of 100.
+- Each fetched XML article is converted into a PubMed-style CSV row with PMID, title, authors, citation, journal/book, publication year, create date, PMCID, NIHMS ID, and DOI.
+- New rows are deduplicated in memory by PMID and written into chunked CSV files under `<stem>_split/`.
+- XML API responses are cached locally in `.pubmed_search_cache.json` and reused on later runs.
+
+Workflow issues found
+
+- `existing_rows` is used as if it were the unique PMID count, which can distort `--max-results` handling and chunk numbering when prior split files contain duplicates.
+- The fetch loop processes only `PubmedArticle` nodes and ignores `PubmedBookArticle`, so some counted PubMed results may never be written.
+- `Create Date` can be emitted as invalid `YYYY/00/00` when month or day is missing.
+- The cache file is rewritten in full after every successful request, which becomes a major bottleneck with a very large cache.
+- Output location is inconsistent: non-empty runs write split files, while zero-result runs write only the standalone `--out` file.
