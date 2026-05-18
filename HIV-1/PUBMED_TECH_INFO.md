@@ -43,6 +43,139 @@ The script then fetches records in batches using:
 
 This is the standard approach for large PubMed result sets because it avoids sending every PMID in the URL.
 
+## API examples
+
+This script uses two endpoints, with `esearch.fcgi` used in two different ways.
+
+| Endpoint | Purpose | Example input params | Example output fields |
+| --- | --- | --- | --- |
+| `esearch.fcgi` | Count how many PubMed records match a query | `db=pubmed`, `term=HIV`, `rettype=count`, `retmode=xml`, `retmax=0` | `Count` |
+| `esearch.fcgi` | Create a PubMed history session for a query or date-split query | `db=pubmed`, `term=(HIV) AND ("2024/01/01"[PDAT] : "2024/12/31"[PDAT])`, `retmode=xml`, `usehistory=y`, `retmax=0` | `Count`, `QueryKey`, `WebEnv` |
+| `efetch.fcgi` | Fetch actual article XML in batches from a history session | `db=pubmed`, `query_key=1`, `WebEnv=MCID_...`, `retstart=0`, `retmax=100`, `retmode=xml` | `PubmedArticle` records with `PMID`, title, authors, journal, dates, IDs |
+
+### `esearch.fcgi` count example
+
+Example request:
+
+```text
+https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&term=HIV&rettype=count&retmode=xml&retmax=0
+```
+
+Example response shape:
+
+```xml
+<eSearchResult>
+  <Count>456703</Count>
+  <RetMax>0</RetMax>
+  <RetStart>0</RetStart>
+  <IdList />
+</eSearchResult>
+```
+
+### `esearch.fcgi` history example
+
+Example request:
+
+```text
+https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&term=%28HIV%29+AND+%28%222024%2F01%2F01%22%5BPDAT%5D+%3A+%222024%2F12%2F31%22%5BPDAT%5D%29&retmode=xml&usehistory=y&retmax=0
+```
+
+Example response shape:
+
+```xml
+<eSearchResult>
+  <Count>8421</Count>
+  <RetMax>0</RetMax>
+  <RetStart>0</RetStart>
+  <QueryKey>1</QueryKey>
+  <WebEnv>MCID_...</WebEnv>
+  <IdList />
+</eSearchResult>
+```
+
+### `efetch.fcgi` batch example
+
+Example request:
+
+```text
+https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=pubmed&query_key=1&WebEnv=MCID_...&retstart=0&retmax=100&retmode=xml
+```
+
+Example response shape:
+
+```xml
+<PubmedArticleSet>
+  <PubmedArticle>
+    <MedlineCitation>
+      <PMID>12345678</PMID>
+      <Article>
+        <ArticleTitle>Example HIV paper title</ArticleTitle>
+      </Article>
+    </MedlineCitation>
+    <PubmedData>
+      <ArticleIdList>
+        <ArticleId IdType="doi">10.1000/example</ArticleId>
+      </ArticleIdList>
+    </PubmedData>
+  </PubmedArticle>
+</PubmedArticleSet>
+```
+
+The script converts each `PubmedArticle` into one CSV row with:
+
+- `PMID`
+- `Title`
+- `Abstract`
+- `Authors`
+- `Citation`
+- `First Author`
+- `Journal/Book`
+- `Publication Year`
+- `Create Date`
+- `PMCID`
+- `NIHMS ID`
+- `DOI`
+
+## Caching
+
+The script caches all API calls it makes.
+
+- `esearch.fcgi` count requests are cached under `.pubmed_search_cache/esearch.fcgi/`
+- `esearch.fcgi` history requests are cached under `.pubmed_search_cache/esearch.fcgi/`
+- `efetch.fcgi` batch requests are cached under `.pubmed_search_cache/efetch.fcgi/`
+
+Each request gets its own cache file.
+
+- one API request = one JSON cache file
+- one `efetch` batch = one cache file
+- one `esearch` query = one cache file
+
+The cache key is based on:
+
+- endpoint name
+- request parameters
+
+The cache key ignores:
+
+- `email`
+- `api_key`
+
+The previous monolithic cache file `.pubmed_search_cache.json` is not used by the new layout.
+
+For `esearch.fcgi` history calls, the script now uses deterministic staged date ranges so cache keys stay reusable across runs.
+
+- each full year starts as two fixed half-year ranges: `Jan-Jun` and `Jul-Dec`
+- if a half-year range exceeds the PubMed limit, that half-year is split into fixed quarters
+- if a quarter range still exceeds the limit, that quarter is split into fixed months
+- if a month range still exceeds the limit, the script recursively halves that date range until it is under the limit
+- the whole search period is covered by this range list, with the final current period clipped to today when needed
+
+There is also a separate PMID index cache in `<stem>_split/<stem>_pmid_index.csv`.
+
+- that file is not an API cache
+- it is a local index of PMIDs already written to split CSV files
+- it is used to skip processing PMIDs that are already present in existing CSV output
+
 ## PubMed ESearch limit
 
 The current script uses `esearch.fcgi` on `db=pubmed` and then pages through the saved result set with `WebEnv` and `QueryKey`.
@@ -108,7 +241,7 @@ The script was updated to reduce the chance of partial downloads:
 The script writes this header to match the official PubMed CSV export as closely as possible:
 
 ```text
-PMID,Title,Authors,Citation,First Author,Journal/Book,Publication Year,Create Date,PMCID,NIHMS ID,DOI
+PMID,Title,Abstract,Authors,Citation,First Author,Journal/Book,Publication Year,Create Date,PMCID,NIHMS ID,DOI
 ```
 
 The file is written as `utf-8-sig`, which preserves the BOM seen in the official PubMed CSV download.
