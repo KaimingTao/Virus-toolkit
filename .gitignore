@@ -209,6 +209,7 @@ __marimo__/
 
 pubmed_search_cache
 pubmed_search
+fetch_pmc_files_cache
 crossref_search_cache
 crossref_search
 *.zip

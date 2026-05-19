@@ -5,10 +5,12 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import json
 import time
 from pathlib import Path
-from typing import Dict, Iterator, List, Sequence
+from typing import Dict, Iterator, List, Optional, Sequence
+from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import urlopen
 import xml.etree.ElementTree as ET
@@ -18,6 +20,7 @@ IDCONV_URL = "https://pmc.ncbi.nlm.nih.gov/tools/idconv/api/v1/articles/"
 OA_URL = "https://www.ncbi.nlm.nih.gov/pmc/utils/oa/oa.fcgi"
 IDCONV_BATCH_SIZE = 200
 REQUEST_DELAY_SECONDS = 0.34
+CACHE_DIR = Path(__file__).with_name("fetch_pmc_files_cache")
 PMID_COLUMN = "PMID"
 PMCID_COLUMN = "PMCID"
 PMC_PDF_URL_COLUMN = "PMC PDF URL"
@@ -47,6 +50,11 @@ def parse_args() -> argparse.Namespace:
         default="virus_toolkit_pmc_fetch",
         help="Tool name passed to NCBI APIs.",
     )
+    parser.add_argument(
+        "--cache-dir",
+        default=str(CACHE_DIR),
+        help="Directory for API cache files (default: ./fetch_pmc_files_cache next to the script).",
+    )
     return parser.parse_args()
 
 
@@ -61,16 +69,117 @@ def chunked(values: Sequence[str], size: int) -> Iterator[List[str]]:
         yield list(values[start:start + size])
 
 
-def request_json(url: str, params: Dict[str, str]) -> Dict[str, object]:
-    query = urlencode(params)
-    with urlopen(f"{url}?{query}", timeout=60) as response:
-        return json.loads(response.read().decode("utf-8"))
+def normalize_cache_params(params: Dict[str, str]) -> Dict[str, str]:
+    return {key: params[key] for key in sorted(params) if key not in {"email"}}
 
 
-def request_xml(url: str, params: Dict[str, str]) -> ET.Element:
+def build_cache_key(endpoint: str, params: Dict[str, str]) -> str:
+    normalized = {"endpoint": endpoint, "params": normalize_cache_params(params)}
+    serialized = json.dumps(normalized, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+
+def build_cache_path(endpoint: str, cache_key: str) -> Path:
+    return CACHE_DIR / endpoint / f"{cache_key}.json"
+
+
+def configure_cache_dir(cache_dir: str) -> None:
+    global CACHE_DIR
+    CACHE_DIR = Path(cache_dir)
+
+
+def load_cache_entry(endpoint: str, params: Dict[str, str], cache_key: str) -> Optional[Dict[str, object]]:
+    cache_path = build_cache_path(endpoint, cache_key)
+    if not cache_path.exists():
+        return None
+    try:
+        payload = json.loads(cache_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    if payload.get("endpoint") != endpoint or payload.get("params") != normalize_cache_params(params):
+        return None
+    return payload
+
+
+def save_cache_entry(endpoint: str, params: Dict[str, str], cache_key: str, response: Dict[str, object]) -> None:
+    cache_path = build_cache_path(endpoint, cache_key)
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = cache_path.with_suffix(".tmp")
+    temp_path.write_text(
+        json.dumps(
+            {
+                "endpoint": endpoint,
+                "params": normalize_cache_params(params),
+                "response": response,
+            },
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    temp_path.replace(cache_path)
+
+
+def request_json(endpoint: str, url: str, params: Dict[str, str], retries: int = 3) -> Dict[str, object]:
+    cache_key = build_cache_key(endpoint, params)
+    cached_entry = load_cache_entry(endpoint, params, cache_key)
+    if isinstance(cached_entry, dict):
+        cached_response = cached_entry.get("response")
+        if isinstance(cached_response, dict):
+            print(f"[cache] {endpoint}")
+            return cached_response
+
     query = urlencode(params)
-    with urlopen(f"{url}?{query}", timeout=60) as response:
-        return ET.fromstring(response.read())
+    full_url = f"{url}?{query}"
+    last_error: Optional[Exception] = None
+    print(f"[api] {endpoint}")
+    for attempt in range(1, retries + 1):
+        try:
+            with urlopen(full_url, timeout=60) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+            if not isinstance(payload, dict):
+                raise RuntimeError("Unexpected JSON response format.")
+            save_cache_entry(endpoint, params, cache_key, payload)
+            return payload
+        except (HTTPError, URLError, json.JSONDecodeError, RuntimeError) as exc:
+            last_error = exc
+            if attempt == retries:
+                break
+            print(f"[retry] {endpoint} attempt {attempt}/{retries} error={exc}")
+            time.sleep(attempt)
+    raise RuntimeError(f"Request failed for {endpoint}: {last_error}") from last_error
+
+
+def request_xml(endpoint: str, url: str, params: Dict[str, str], retries: int = 3) -> ET.Element:
+    cache_key = build_cache_key(endpoint, params)
+    cached_entry = load_cache_entry(endpoint, params, cache_key)
+    if isinstance(cached_entry, dict):
+        cached_response = cached_entry.get("response")
+        if isinstance(cached_response, dict):
+            xml_text = cached_response.get("xml")
+            if isinstance(xml_text, str):
+                print(f"[cache] {endpoint}")
+                return ET.fromstring(xml_text)
+
+    query = urlencode(params)
+    full_url = f"{url}?{query}"
+    last_error: Optional[Exception] = None
+    print(f"[api] {endpoint}")
+    for attempt in range(1, retries + 1):
+        try:
+            with urlopen(full_url, timeout=60) as response:
+                xml_text = response.read().decode("utf-8")
+            root = ET.fromstring(xml_text)
+            save_cache_entry(endpoint, params, cache_key, {"xml": xml_text})
+            return root
+        except (HTTPError, URLError, ET.ParseError) as exc:
+            last_error = exc
+            if attempt == retries:
+                break
+            print(f"[retry] {endpoint} attempt {attempt}/{retries} error={exc}")
+            time.sleep(attempt)
+    raise RuntimeError(f"Request failed for {endpoint}: {last_error}") from last_error
 
 
 def sanitize_pmid(value: str) -> str:
@@ -88,6 +197,7 @@ def fetch_pmcid_map(pmids: Sequence[str], email: str, tool: str) -> Dict[str, st
             f"pmids={len(batch)} resolved_so_far={len(mapping)}"
         )
         response = request_json(
+            "idconv",
             IDCONV_URL,
             {
                 "ids": ",".join(batch),
@@ -115,7 +225,7 @@ def fetch_pmcid_map(pmids: Sequence[str], email: str, tool: str) -> Dict[str, st
 
 
 def fetch_oa_links(pmcid: str) -> Dict[str, str]:
-    root = request_xml(OA_URL, {"id": pmcid})
+    root = request_xml("oa", OA_URL, {"id": pmcid})
     links = {
         PMC_PDF_URL_COLUMN: "",
         PMC_TGZ_URL_COLUMN: "",
@@ -193,6 +303,7 @@ def process_csv(csv_path: Path, email: str, tool: str) -> Path:
 
 def main() -> int:
     args = parse_args()
+    configure_cache_dir(args.cache_dir)
     input_dir = args.input_dir.resolve()
     if not input_dir.is_dir():
         raise SystemExit(f"Input folder not found: {input_dir}")
