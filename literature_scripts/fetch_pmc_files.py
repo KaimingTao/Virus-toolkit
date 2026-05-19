@@ -80,8 +80,13 @@ def sanitize_pmid(value: str) -> str:
 def fetch_pmcid_map(pmids: Sequence[str], email: str, tool: str) -> Dict[str, str]:
     mapping: Dict[str, str] = {}
     unique_pmids = [pmid for pmid in dict.fromkeys(pmids) if pmid]
+    total_batches = (len(unique_pmids) + IDCONV_BATCH_SIZE - 1) // IDCONV_BATCH_SIZE
 
-    for batch in chunked(unique_pmids, IDCONV_BATCH_SIZE):
+    for batch_index, batch in enumerate(chunked(unique_pmids, IDCONV_BATCH_SIZE), start=1):
+        print(
+            f"[pmcid] batch {batch_index}/{total_batches} "
+            f"pmids={len(batch)} resolved_so_far={len(mapping)}"
+        )
         response = request_json(
             IDCONV_URL,
             {
@@ -139,8 +144,10 @@ def process_csv(csv_path: Path, email: str, tool: str) -> Path:
             raise RuntimeError(f"{csv_path.name} is missing the required {PMID_COLUMN!r} column.")
         rows = list(reader)
 
+    print(f"[rows] {csv_path.name} total_rows={len(rows)}")
     pmids = [sanitize_pmid(row.get(PMID_COLUMN, "")) for row in rows]
     pmcid_map = fetch_pmcid_map(pmids, email=email, tool=tool)
+    print(f"[pmcid] {csv_path.name} matched_pmcids={len(pmcid_map)}")
 
     output_fieldnames = [
         PMID_COLUMN,
@@ -151,7 +158,8 @@ def process_csv(csv_path: Path, email: str, tool: str) -> Path:
 
     oa_links_by_pmcid: Dict[str, Dict[str, str]] = {}
     output_rows: List[Dict[str, str]] = []
-    for row in rows:
+    total_rows = len(rows)
+    for row_index, row in enumerate(rows, start=1):
         pmid = sanitize_pmid(row.get(PMID_COLUMN, ""))
         pmcid = pmcid_map.get(pmid, "")
         output_row = {
@@ -166,6 +174,7 @@ def process_csv(csv_path: Path, email: str, tool: str) -> Path:
             continue
 
         if pmcid not in oa_links_by_pmcid:
+            print(f"[oa] {csv_path.name} row {row_index}/{total_rows} pmcid={pmcid}")
             oa_links_by_pmcid[pmcid] = fetch_oa_links(pmcid)
             time.sleep(REQUEST_DELAY_SECONDS)
 
@@ -178,6 +187,7 @@ def process_csv(csv_path: Path, email: str, tool: str) -> Path:
         writer.writeheader()
         writer.writerows(output_rows)
 
+    print(f"[write] {output_path.name} rows={len(output_rows)}")
     return output_path
 
 

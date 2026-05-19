@@ -209,4 +209,6 @@ __marimo__/
 
 pubmed_search_cache
 pubmed_search
+crossref_search_cache
+crossref_search
 *.zip
