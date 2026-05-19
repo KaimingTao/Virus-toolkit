@@ -36,7 +36,7 @@ REQUEST_DELAY_SECONDS = 0.34
 PUBMED_QUERY_LIMIT = 9999
 DATE_FIELD = "PDAT"
 EARLIEST_PUBMED_DATE = date(1800, 1, 1)
-CACHE_DIR = Path(__file__).with_name(".pubmed_search_cache")
+CACHE_DIR = Path(__file__).with_name("pubmed_search_cache")
 CSV_COLUMNS = [
     "PMID",
     "Title",
@@ -124,6 +124,11 @@ def build_cache_key(endpoint: str, params: Dict[str, str]) -> str:
 
 def build_cache_path(endpoint: str, cache_key: str) -> Path:
     return CACHE_DIR / endpoint / f"{cache_key}.json"
+
+
+def configure_cache_dir(cache_dir: str) -> None:
+    global CACHE_DIR
+    CACHE_DIR = Path(cache_dir)
 
 
 def load_cache_entry(endpoint: str, params: Dict[str, str], cache_key: str) -> Optional[Dict[str, object]]:
@@ -856,6 +861,11 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
     )
     parser.add_argument("--email", help="Your email address for NCBI E-utilities.")
     parser.add_argument("--api-key", help="NCBI API key to increase rate limits.")
+    parser.add_argument(
+        "--cache-dir",
+        default=str(CACHE_DIR),
+        help="Directory for API cache files (default: ./pubmed_search_cache next to the script).",
+    )
     parser.add_argument("--max-results", type=int, help="Optional cap on number of articles to fetch.")
     parser.add_argument(
         "--rows-per-file",
@@ -868,6 +878,7 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
 
 def main(argv: List[str]) -> int:
     args = parse_args(argv)
+    configure_cache_dir(args.cache_dir)
     try:
         written, files_written, output_dir = write_csv(
             args.term,
