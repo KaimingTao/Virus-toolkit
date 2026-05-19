@@ -208,5 +208,5 @@ __marimo__/
 
 
 pubmed_search_cache
-HIV-1/hiv_pubmed_split/
-HIV-1/hiv_pubmed_split.zip
+pubmed_search
+*.zip

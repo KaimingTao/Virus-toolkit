@@ -37,6 +37,7 @@ PUBMED_QUERY_LIMIT = 9999
 DATE_FIELD = "PDAT"
 EARLIEST_PUBMED_DATE = date(1800, 1, 1)
 CACHE_DIR = Path(__file__).with_name("pubmed_search_cache")
+OUTPUT_DIR_NAME = "pubmed_search"
 CSV_COLUMNS = [
     "PMID",
     "Title",
@@ -70,7 +71,7 @@ class ChunkedCsvWriter:
         self.base_path = base_path
         self.rows_per_file = rows_per_file
         self.fieldnames = fieldnames
-        self.output_dir = base_path.with_name(f"{base_path.stem}_split")
+        self.output_dir = base_path.with_name(OUTPUT_DIR_NAME)
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
         self._file_handle = None
@@ -759,7 +760,7 @@ def write_csv(
     rows_per_file: int,
 ) -> tuple[int, int, Path]:
     base_path = Path(out_path)
-    output_dir = base_path.with_name(f"{base_path.stem}_split")
+    output_dir = base_path.with_name(OUTPUT_DIR_NAME)
     existing_pmids, existing_rows, existing_files, _ = load_or_build_pmid_index(
         output_dir, base_path.stem
     )
@@ -857,7 +858,7 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
     parser.add_argument(
         "--out",
         default="hiv_pubmed.csv",
-        help="Base CSV file path. Results are written to <stem>_split/*.csv.",
+        help="Base CSV file path. Results are written to ./pubmed_search/*.csv.",
     )
     parser.add_argument("--email", help="Your email address for NCBI E-utilities.")
     parser.add_argument("--api-key", help="NCBI API key to increase rate limits.")
