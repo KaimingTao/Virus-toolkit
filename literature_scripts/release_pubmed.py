@@ -114,9 +114,11 @@ def ensure_gh_available() -> None:
 
 
 def create_zip(pubmed_dir: Path, zip_path: Path, dry_run: bool) -> None:
-    print(f"Creating archive: {zip_path}")
     if dry_run:
+        print(f"Would create archive: {zip_path}")
         return
+
+    print(f"Creating archive: {zip_path}")
 
     if zip_path.exists():
         zip_path.unlink()
@@ -152,7 +154,8 @@ def main(argv: list[str]) -> int:
     args = parse_args(argv)
 
     repo_root = resolve_repo_root(Path.cwd().resolve())
-    ensure_gh_available()
+    if not args.dry_run:
+        ensure_gh_available()
 
     virus_dir = (repo_root / args.virus_dir).resolve()
     if not virus_dir.is_dir():
@@ -178,10 +181,13 @@ def main(argv: list[str]) -> int:
     print(f"tag={tag_name}")
     print(f"target={release_target}")
 
-    confirm_or_exit(
-        "This will create a zip archive and publish a GitHub release.",
-        args.yes,
-    )
+    if args.dry_run:
+        print("Dry run: no archive or GitHub release will be created.")
+    else:
+        confirm_or_exit(
+            "This will create a zip archive and publish a GitHub release.",
+            args.yes,
+        )
 
     create_zip(pubmed_dir, zip_path, args.dry_run)
 
