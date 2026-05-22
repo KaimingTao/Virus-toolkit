@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Create a GitHub release for a virus-specific PubMed split dataset."""
+"""Create a GitHub release for a virus-specific PubMed dataset."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Zip a virus PubMed split folder and create a GitHub release with gh."
+            "Zip a virus PubMed folder and create a GitHub release with gh."
         )
     )
     parser.add_argument(
@@ -27,17 +27,17 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         "--pubmed",
         type=Path,
         default=None,
-        help="Explicit PubMed directory. Defaults to the only *_pubmed_split directory under virus_dir.",
+        help="Explicit PubMed directory. Defaults to virus_dir/pubmed_search.",
     )
     parser.add_argument(
         "--tag",
         default=None,
-        help="Release tag name. Defaults to <virus>-<split-dir>-YYYY-MM-DD.",
+        help="Release tag name. Defaults to <virus>-<pubmed-dir>-YYYY-MM-DD.",
     )
     parser.add_argument(
         "--release-title",
         default=None,
-        help="GitHub release title. Defaults to '<virus> PubMed split CSVs'.",
+        help="GitHub release title. Defaults to '<virus> PubMed CSVs'.",
     )
     parser.add_argument(
         "--release-notes",
@@ -102,16 +102,10 @@ def resolve_pubmed_dir(virus_dir: Path, pubmed_dir: Path | None) -> Path:
             raise SystemExit(f"PubMed directory not found: {resolved}")
         return resolved
 
-    matches = sorted(path for path in virus_dir.iterdir() if path.is_dir() and path.name.endswith("_pubmed_split"))
-    if not matches:
-        raise SystemExit(f"No *_pubmed_split directory found under {virus_dir}")
-    if len(matches) > 1:
-        names = ", ".join(path.name for path in matches)
-        raise SystemExit(
-            f"Multiple *_pubmed_split directories found under {virus_dir}: {names}. "
-            "Pass --pubmed explicitly."
-        )
-    return matches[0].resolve()
+    resolved = (virus_dir / "pubmed_search").resolve()
+    if not resolved.is_dir():
+        raise SystemExit(f"Default PubMed directory not found: {resolved}")
+    return resolved
 
 
 def ensure_gh_available() -> None:
@@ -142,7 +136,7 @@ def confirm_or_exit(message: str, assume_yes: bool) -> None:
 
 def build_defaults(virus_dir: Path, pubmed_dir: Path) -> tuple[str, str, str]:
     tag = f"{virus_dir.name.lower()}-{pubmed_dir.name.replace('_', '-')}-{date.today().isoformat()}"
-    title = f"{virus_dir.name} PubMed split CSVs"
+    title = f"{virus_dir.name} PubMed CSVs"
     notes = f"Archived release asset for {pubmed_dir.relative_to(virus_dir.parent).as_posix()}."
     return tag, title, notes
 
