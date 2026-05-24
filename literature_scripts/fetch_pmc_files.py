@@ -9,7 +9,7 @@ import hashlib
 import json
 import time
 from pathlib import Path
-from typing import Dict, Iterator, List, Optional, Sequence
+from typing import Dict, Iterator, List, Optional, Sequence, Tuple
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import urlopen
@@ -121,14 +121,19 @@ def save_cache_entry(endpoint: str, params: Dict[str, str], cache_key: str, resp
     temp_path.replace(cache_path)
 
 
-def request_json(endpoint: str, url: str, params: Dict[str, str], retries: int = 3) -> Dict[str, object]:
+def request_json(
+    endpoint: str,
+    url: str,
+    params: Dict[str, str],
+    retries: int = 3,
+) -> Tuple[Dict[str, object], bool]:
     cache_key = build_cache_key(endpoint, params)
     cached_entry = load_cache_entry(endpoint, params, cache_key)
     if isinstance(cached_entry, dict):
         cached_response = cached_entry.get("response")
         if isinstance(cached_response, dict):
             print(f"[cache] {endpoint}")
-            return cached_response
+            return cached_response, True
 
     query = urlencode(params)
     full_url = f"{url}?{query}"
@@ -141,7 +146,7 @@ def request_json(endpoint: str, url: str, params: Dict[str, str], retries: int =
             if not isinstance(payload, dict):
                 raise RuntimeError("Unexpected JSON response format.")
             save_cache_entry(endpoint, params, cache_key, payload)
-            return payload
+            return payload, False
         except (HTTPError, URLError, json.JSONDecodeError, RuntimeError) as exc:
             last_error = exc
             if attempt == retries:
@@ -151,7 +156,12 @@ def request_json(endpoint: str, url: str, params: Dict[str, str], retries: int =
     raise RuntimeError(f"Request failed for {endpoint}: {last_error}") from last_error
 
 
-def request_xml(endpoint: str, url: str, params: Dict[str, str], retries: int = 3) -> ET.Element:
+def request_xml(
+    endpoint: str,
+    url: str,
+    params: Dict[str, str],
+    retries: int = 3,
+) -> Tuple[ET.Element, bool]:
     cache_key = build_cache_key(endpoint, params)
     cached_entry = load_cache_entry(endpoint, params, cache_key)
     if isinstance(cached_entry, dict):
@@ -160,7 +170,7 @@ def request_xml(endpoint: str, url: str, params: Dict[str, str], retries: int = 
             xml_text = cached_response.get("xml")
             if isinstance(xml_text, str):
                 print(f"[cache] {endpoint}")
-                return ET.fromstring(xml_text)
+                return ET.fromstring(xml_text), True
 
     query = urlencode(params)
     full_url = f"{url}?{query}"
@@ -172,7 +182,7 @@ def request_xml(endpoint: str, url: str, params: Dict[str, str], retries: int = 
                 xml_text = response.read().decode("utf-8")
             root = ET.fromstring(xml_text)
             save_cache_entry(endpoint, params, cache_key, {"xml": xml_text})
-            return root
+            return root, False
         except (HTTPError, URLError, ET.ParseError) as exc:
             last_error = exc
             if attempt == retries:
@@ -196,7 +206,7 @@ def fetch_pmcid_map(pmids: Sequence[str], email: str, tool: str) -> Dict[str, st
             f"[pmcid] batch {batch_index}/{total_batches} "
             f"pmids={len(batch)} resolved_so_far={len(mapping)}"
         )
-        response = request_json(
+        response, from_cache = request_json(
             "idconv",
             IDCONV_URL,
             {
@@ -219,13 +229,14 @@ def fetch_pmcid_map(pmids: Sequence[str], email: str, tool: str) -> Dict[str, st
             if pmid and pmcid:
                 mapping[pmid] = pmcid
 
-        time.sleep(REQUEST_DELAY_SECONDS)
+        if not from_cache:
+            time.sleep(REQUEST_DELAY_SECONDS)
 
     return mapping
 
 
-def fetch_oa_links(pmcid: str) -> Dict[str, str]:
-    root = request_xml("oa", OA_URL, {"id": pmcid})
+def fetch_oa_links(pmcid: str) -> Tuple[Dict[str, str], bool]:
+    root, from_cache = request_xml("oa", OA_URL, {"id": pmcid})
     links = {
         PMC_PDF_URL_COLUMN: "",
         PMC_TGZ_URL_COLUMN: "",
@@ -243,7 +254,7 @@ def fetch_oa_links(pmcid: str) -> Dict[str, str]:
             elif fmt == "tgz":
                 links[PMC_TGZ_URL_COLUMN] = href
         break
-    return links
+    return links, from_cache
 
 
 def process_csv(csv_path: Path, email: str, tool: str) -> Path:
@@ -285,8 +296,10 @@ def process_csv(csv_path: Path, email: str, tool: str) -> Path:
 
         if pmcid not in oa_links_by_pmcid:
             print(f"[oa] {csv_path.name} row {row_index}/{total_rows} pmcid={pmcid}")
-            oa_links_by_pmcid[pmcid] = fetch_oa_links(pmcid)
-            time.sleep(REQUEST_DELAY_SECONDS)
+            oa_links, from_cache = fetch_oa_links(pmcid)
+            oa_links_by_pmcid[pmcid] = oa_links
+            if not from_cache:
+                time.sleep(REQUEST_DELAY_SECONDS)
 
         output_row.update(oa_links_by_pmcid[pmcid])
         output_rows.append(output_row)
