@@ -5,10 +5,10 @@ Translation alignment summary
   translated length: 3013 aa
   protein length: 3012 aa
   alignment length: 3013 aa
-  matches: 3001
-  mismatches: 11
+  matches: 3012
+  mismatches: 0
   gaps: 1
-  identity: 99.60%
+  identity: 99.97%
 
 na codon   ATG AGC ACG AAT CCT AAA CCT CAA AGA AAA ACC AAA CGT AAC ACC AAC CGC CGC CCA CAG GAC GTT AAG TTC CCG
 translated  M   S   T   N   P   K   P   Q   R   K   T   K   R   N   T   N   R   R   P   Q   D   V   K   F   P 
@@ -76,8 +76,8 @@ match       |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   
 protein     T   Q   S   C   N   C   S   I   Y   P   G   H   V   T   G   H   R   M   A   W   D   M   M   M   N 
 
 na codon   TGG TCA CCT ACY GCA GCC CTG GTG ATG TCG CAG GTA TTC CGG ATC CCG CAA GCT ATC GTG GAT ATC ATA GCG GGG
-translated  W   S   P   X   A   A   L   V   M   S   Q   V   F   R   I   P   Q   A   I   V   D   I   I   A   G 
-match       |   |   |   .   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   | 
+translated  W   S   P   T   A   A   L   V   M   S   Q   V   F   R   I   P   Q   A   I   V   D   I   I   A   G 
+match       |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   | 
 protein     W   S   P   T   A   A   L   V   M   S   Q   V   F   R   I   P   Q   A   I   V   D   I   I   A   G 
 
 na codon   GCC CAC TGG GGT ATC CTG GCG GGC CTA GCT TAC TAC TCC ATG GTG GCG AAC TGG GCG AAG GTC CTG ATC GTG TTG
@@ -96,8 +96,8 @@ match       |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   
 protein     S   I   F   A   P   G   A   Q   Q   R   I   Q   L   V   N   T   N   G   S   W   H   V   N   R   T 
 
 na codon   GCC CTA AAT TGC AAT GAC TCC CTT AAT ACC GGG TTC ATC GCC GCG CTG TTY TAC ACG CGC AGG TTC AAC TCA TCT
-translated  A   L   N   C   N   D   S   L   N   T   G   F   I   A   A   L   X   Y   T   R   R   F   N   S   S 
-match       |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   .   |   |   |   |   |   |   |   | 
+translated  A   L   N   C   N   D   S   L   N   T   G   F   I   A   A   L   F   Y   T   R   R   F   N   S   S 
+match       |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   | 
 protein     A   L   N   C   N   D   S   L   N   T   G   F   I   A   A   L   F   Y   T   R   R   F   N   S   S 
 
 na codon   GGC TGC CCC GAG AGG ATG GCT AGT TGC CGG CCC ATT ACA GAC TTT GCC CAA GGG TCG GGC CCC ATC ACG TAT GCC
@@ -116,8 +116,8 @@ match       |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   
 protein     E   V   C   G   P   V   Y   C   F   T   P   S   P   V   V   V   G   T   T   D   R   A   G   V   P 
 
 na codon   ACC TAC ACT TGG GGG GAG AAT GAG ACA GAY GTG TTA TTG CTC AAC AAC ACG AGG CCC CCG GCT GGC AAY TGG TTC
-translated  T   Y   T   W   G   E   N   E   T   X   V   L   L   L   N   N   T   R   P   P   A   G   X   W   F 
-match       |   |   |   |   |   |   |   |   |   .   |   |   |   |   |   |   |   |   |   |   |   |   .   |   | 
+translated  T   Y   T   W   G   E   N   E   T   D   V   L   L   L   N   N   T   R   P   P   A   G   N   W   F 
+match       |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   | 
 protein     T   Y   T   W   G   E   N   E   T   D   V   L   L   L   N   N   T   R   P   P   A   G   N   W   F 
 
 na codon   GGC TGT ACC TGG ATG AAT GCC ACT GGG TTT ACC AAA ACT TGT GGG GCC CCT CCA TGC AAC ATC GGG GGA TGG GGC
@@ -266,8 +266,8 @@ match       |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   
 protein     K   V   L   V   L   N   P   S   V   A   A   T   L   G   F   G   A   Y   M   S   K   A   Y   G   I 
 
 na codon   GAT CCA AAC ATA AGG ACC GGC GTG AGG ACC ATC ACC ACA GGC TCT GCC ATC ACA TAT TCC ACC TAT GGY AAA TTC
-translated  D   P   N   I   R   T   G   V   R   T   I   T   T   G   S   A   I   T   Y   S   T   Y   X   K   F 
-match       |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   .   |   | 
+translated  D   P   N   I   R   T   G   V   R   T   I   T   T   G   S   A   I   T   Y   S   T   Y   G   K   F 
+match       |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   | 
 protein     D   P   N   I   R   T   G   V   R   T   I   T   T   G   S   A   I   T   Y   S   T   Y   G   K   F 
 
 na codon   TTG GCC GAC AAC GGG TGC TCA GGC GGG GCC TAC GAC ATA ATC ATC TGT GAT GAG TGT CAC TCA ACT GAC GCG ACC
@@ -381,8 +381,8 @@ match       |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   
 protein     A   A   T   A   F   V   G   A   G   L   V   G   A   A   V   G   S   V   G   I   G   K   V   L   V 
 
 na codon   GAC ATC CTT GCC GGT TAT GGY GCG GGG GTG GCT GGC GCC CTC GTG GCT TTT AAA GTC ATG AGT GGG GAG GTC CCC
-translated  D   I   L   A   G   Y   X   A   G   V   A   G   A   L   V   A   F   K   V   M   S   G   E   V   P 
-match       |   |   |   |   |   |   .   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   | 
+translated  D   I   L   A   G   Y   G   A   G   V   A   G   A   L   V   A   F   K   V   M   S   G   E   V   P 
+match       |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   | 
 protein     D   I   L   A   G   Y   G   A   G   V   A   G   A   L   V   A   F   K   V   M   S   G   E   V   P 
 
 na codon   ACC ACT GAA GAC TTG GTC AAC CTA TTG CCC GCT ATT CTA TCG CCG GGA GCT CTG GTG GTC GGC GTC GTT TGC GCA
@@ -426,8 +426,8 @@ match       |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   
 protein     R   T   C   S   N   T   W   H   G   T   F   P   I   N   A   Y   T   T   G   P   C   T   P   A   P 
 
 na codon   GCG CAC AAT TAT TCA CGT GCG CTG TGG AGG GTA TCT GCC GAG GAG TAC GTG GAG GTA AGG CGR GTG GGA GAC TAC
-translated  A   H   N   Y   S   R   A   L   W   R   V   S   A   E   E   Y   V   E   V   R   X   V   G   D   Y 
-match       |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   .   |   |   |   | 
+translated  A   H   N   Y   S   R   A   L   W   R   V   S   A   E   E   Y   V   E   V   R   R   V   G   D   Y 
+match       |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   | 
 protein     A   H   N   Y   S   R   A   L   W   R   V   S   A   E   E   Y   V   E   V   R   R   V   G   D   Y 
 
 na codon   CAT TAC GTG ACA GGC ATG ACG GCT GAC AAC CTA AAG TGC CCA TGT CAA GTC CCT TCA CCA GAG TTC TTC ACA GAG
@@ -451,8 +451,8 @@ match       |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   
 protein     L   T   D   P   S   H   I   T   A   E   A   A   K   R   R   L   D   R   G   S   P   P   S   L   A 
 
 na codon   AGC TCY TCG GCT AGC CAG TTG TCT GCT CCG TCC CTG AAG GCG ACA TGT ACT ACC CAC CAC CAG TCC CCG GAC GCG
-translated  S   X   S   A   S   Q   L   S   A   P   S   L   K   A   T   C   T   T   H   H   Q   S   P   D   A 
-match       |   .   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   | 
+translated  S   S   S   A   S   Q   L   S   A   P   S   L   K   A   T   C   T   T   H   H   Q   S   P   D   A 
+match       |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   | 
 protein     S   S   S   A   S   Q   L   S   A   P   S   L   K   A   T   C   T   T   H   H   Q   S   P   D   A 
 
 na codon   GAC CTC ATT GAG GCC AAC CTC CTG TGG CGG CAG GAA ATG GGC GGA AAC ATC ACC CGT GTG GAA TCT GAG AAC AAG
@@ -521,8 +521,8 @@ match       |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   
 protein     A   K   D   V   R   D   L   A   S   K   A   V   R   H   I   N   S   V   W   Q   D   L   L   E   D 
 
 na codon   AAC CAY ACA CCA ATT GAC ACC ACC ATC ATG GCA AAG AAC GAA GTG TTC TGC GTG GAC CCT TCG AAG GGA GGC CGT
-translated  N   X   T   P   I   D   T   T   I   M   A   K   N   E   V   F   C   V   D   P   S   K   G   G   R 
-match       |   .   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   | 
+translated  N   H   T   P   I   D   T   T   I   M   A   K   N   E   V   F   C   V   D   P   S   K   G   G   R 
+match       |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   | 
 protein     N   H   T   P   I   D   T   T   I   M   A   K   N   E   V   F   C   V   D   P   S   K   G   G   R 
 
 na codon   AAG CCA GCT CGC CTC ATC GTA TTC CCT GAC TTG GGA GTG CGT GTG TGC GAG AAA ATA GCT TTA TAC GAT GTC ATC
@@ -536,8 +536,8 @@ match       |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   
 protein     S   K   L   P   Q   A   V   M   G   D   A   Y   G   F   Q   Y   S   P   G   Q   R   V   E   F   L 
 
 na codon   GTR AAG GTT TGG AAG TCC AAA GCT AAC CCT ATG GGC TTC TCA TAT GAT ACC CGC TGT TTT GAC TCG ACC GTT ACT
-translated  X   K   V   W   K   S   K   A   N   P   M   G   F   S   Y   D   T   R   C   F   D   S   T   V   T 
-match       .   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   | 
+translated  V   K   V   W   K   S   K   A   N   P   M   G   F   S   Y   D   T   R   C   F   D   S   T   V   T 
+match       |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   | 
 protein     V   K   V   W   K   S   K   A   N   P   M   G   F   S   Y   D   T   R   C   F   D   S   T   V   T 
 
 na codon   GAA CAT GAC ATC CGT ACG GAG GAG TCT ATC TAC CAA TCT TGT GAC CTG GAC CCC GAT GCT CGC AAA GCG ATA GCC
@@ -566,8 +566,8 @@ match       |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   
 protein     Q   E   D   A   A   S   L   R   V   F   T   E   A   M   T   R   Y   S   A   P   P   G   D   P   P 
 
 na codon   CAA CCA GAA TAC GAC CTA GAG CGC ATA TCA TCC TGC TCT TCC AAC GTG TCR GTC GCC CAC GAT GCC AAT GGC AAA
-translated  Q   P   E   Y   D   L   E   R   I   S   S   C   S   S   N   V   X   V   A   H   D   A   N   G   K 
-match       |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   .   |   |   |   |   |   |   |   | 
+translated  Q   P   E   Y   D   L   E   R   I   S   S   C   S   S   N   V   S   V   A   H   D   A   N   G   K 
+match       |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   |   | 
 protein     Q   P   E   Y   D   L   E   R   I   S   S   C   S   S   N   V   S   V   A   H   D   A   N   G   K 
 
 na codon   AGA GTC TAC TAC CTG ACC CGT GAC CCC ACC ACT CCA CTC GCG CGA GCC GCG TGG GAA ACA GCA AGA CAC ACT CCA

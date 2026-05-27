@@ -71,6 +71,25 @@ GENETIC_CODE = {
     "GGG": "G",
 }
 
+IUPAC_BASES = {
+    "A": "A",
+    "C": "C",
+    "G": "G",
+    "T": "T",
+    "U": "T",
+    "R": "AG",
+    "Y": "CT",
+    "S": "GC",
+    "W": "AT",
+    "K": "GT",
+    "M": "AC",
+    "B": "CGT",
+    "D": "AGT",
+    "H": "ACT",
+    "V": "ACG",
+    "N": "ACGT",
+}
+
 MATCH_SCORE = 2
 MISMATCH_SCORE = -1
 GAP_SCORE = -2
@@ -127,9 +146,27 @@ def translate_dna(sequence: str) -> str:
 
     for index in range(0, len(normalized) - 2, 3):
         codon = normalized[index : index + 3]
-        protein.append(GENETIC_CODE.get(codon, "X"))
+        protein.append(translate_codon(codon))
 
     return "".join(protein)
+
+
+def translate_codon(codon: str) -> str:
+    possible_codons = [""]
+    for base in codon:
+        possible_bases = IUPAC_BASES.get(base)
+        if possible_bases is None:
+            return "X"
+        possible_codons = [
+            prefix + possible_base
+            for prefix in possible_codons
+            for possible_base in possible_bases
+        ]
+
+    amino_acids = {GENETIC_CODE[possible_codon] for possible_codon in possible_codons}
+    if len(amino_acids) == 1:
+        return amino_acids.pop()
+    return "X"
 
 
 def codons_from_dna(sequence: str) -> list[str]:
