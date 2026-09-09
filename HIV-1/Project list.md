@@ -1,4 +1,0 @@
-- Stanford HIVDB
-    - genotype and phenotype resistance mutations
-    - surveillance mutations
-    - in vivo and in vitro selected mutations

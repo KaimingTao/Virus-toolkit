@@ -1,2 +1,0 @@
-- Rotavirus, RV
-    - 轮状病毒
